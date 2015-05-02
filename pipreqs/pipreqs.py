@@ -7,6 +7,7 @@ Usage:
 
 Options:
     --debug             Print debug information
+    --local             Use versions of locally installed packages if possible instead of latest versions
     --savepath <file>   Save the list of requirements in the given file
 """
 from __future__ import print_function
@@ -70,18 +71,30 @@ def generate_requirements_file(path, imports):
         out_file.write('\n'.join(fmt.format(**item) for item in imports) + '\n')
 
 
-def get_imports_info(imports):
+def get_imports_info(imports, local):
     result = []
+    local_packages = {}
+
+    if local:
+        from pip.utils import get_installed_distributions
+
+        for package in get_installed_distributions():
+            local_packages[package.key] = package.version
+
     for item in imports:
-        try:
-            data = yarg.get(item)
-        except HTTPError:
-            logging.debug('Package does not exist or network problems')
-            continue
-        if not data or not data.release_ids:
-            continue
-        last_release = data.latest_release_id
-        result.append({'name': item, 'version': last_release})
+        local_version = local_packages.get(item)
+        if local and local_version is not None:
+            result.append({'name': item, 'version': local_version})
+        else:
+            try:
+                data = yarg.get(item)
+            except HTTPError:
+                logging.debug('Package does not exist or network problems')
+                continue
+            if not data or not data.release_ids:
+                continue
+            last_release = data.latest_release_id
+            result.append({'name': item, 'version': last_release})
     return result
 
 
@@ -89,7 +102,7 @@ def init(args):
     print("Looking for imports")
     imports = get_all_imports(args['<path>'])
     print("Getting latest information about packages from PyPI")
-    imports_with_info = get_imports_info(imports)
+    imports_with_info = get_imports_info(imports, args['--local'])
     print("Found third-party imports: " + ", ".join(imports))
     path = args["--savepath"] if args["--savepath"] else os.path.join(args['<path>'], "requirements.txt")
     generate_requirements_file(path, imports_with_info)
